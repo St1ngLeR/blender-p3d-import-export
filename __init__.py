@@ -11,10 +11,10 @@ if 'bpy' in locals():
 
 bl_info = {
     'name': 'Crashday p3d Exporter',
-    'author': 'Wurunduk',
-    'blender': (2, 83, 0),
+    'author': 'Wurunduk, St1ngLeR',
+    'blender': (4, 0, 0),
     'location': 'File > Import-Export',
-    'version': (1, 7, 0),
+    'version': (1, 6, 3),
     'support': 'COMMUNITY',
     'category': 'Import-Export'}
 
