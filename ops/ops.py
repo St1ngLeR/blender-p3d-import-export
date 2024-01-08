@@ -48,7 +48,7 @@ class IMPORT_OT_cdp3d(bpy.types.Operator, ImportHelper):
 
     use_edge_split_modifier : BoolProperty(
         name        = 'Use EdgeSplit, remove doubles',
-        default     = True
+        default     = False
     )
 
     remove_doubles_distance : FloatProperty(
@@ -56,10 +56,24 @@ class IMPORT_OT_cdp3d(bpy.types.Operator, ImportHelper):
         default     = 0.00001
     )
 
-    search_textures : BoolProperty(
-        name        = 'Search textures',
-        description = 'Tries to find texture folders and load correct textures for the model',
-        default     = True
+    cd_path         : StringProperty(
+        name        = 'Path to general texture folder',
+        description = 'If provided plugin will auto load textures from this folder'
+    )
+
+    car_path        : StringProperty(
+        name        = 'Path to a car texture folder',
+        description = 'If provided plugin will auto load textures from this folder'
+    )
+
+    cd_path_mod     : StringProperty(
+        name        = 'Path to general texture folder of the mod',
+        description = 'If provided plugin will auto load textures from this folder'
+    )
+
+    car_path_mod    : StringProperty(
+        name        = 'Path to car texture folder of the mod',
+        description = 'If provided plugin will auto load textures from this folder'
     )
 
     def execute(self, context):
