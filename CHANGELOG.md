@@ -8,12 +8,17 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 ### Changed
 ### Fixed
 
-## [1.6.3] 2024-01-09
-### Changed
-- The changes were rolled back to version 1.6.1 (due to a broken object origin system on export)
+## [1.7.1] 2024-01-09
 ### Fixed
 - Full Blender 4.x compatibility: The plugin is using "Specular IOR Level" instead of unused "Specular" for materials values on import
 - "Use Edge Split" checkbox is disabled by default on P3D import
+
+## [1.7.0] 2020-12-24
+### Added
+- Added auto applying of object transformations on export
+- Added auto-scanning for textures in relevant folders
+### Fixed
+- Fixed possible object bounds error which may have lead to collision bugs
 
 ## [1.6.2] ???
 ### Fixed
