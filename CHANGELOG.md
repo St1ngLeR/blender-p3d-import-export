@@ -9,9 +9,13 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/en/1.0.0/)
 ### Fixed
 
 ## [1.7.1] 2024-01-09
+### Added
+- New "Hide special submeshes" option on import (enabled by default) which is hides specific meshes as "maincoll", "mainshad" and etc.
+- Added support for classic Crashday's file directories on import for textures search
 ### Fixed
-- Full Blender 4.x compatibility: The plugin is using "Specular IOR Level" instead of unused "Specular" for materials values on import
+- Full Blender 4.x compatibility: The plugin has fixed import on modern Blender versions. All plugin features are should work perfect now.
 - "Use Edge Split" checkbox is disabled by default on P3D import
+- "Use 'floor_level'" checkbox is disabled by default on P3D export 
 
 ## [1.7.0] 2020-12-24
 ### Added
