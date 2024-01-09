@@ -1,6 +1,9 @@
+
 import bpy, bmesh, os
 import time
 import struct
+
+from pathlib import Path
 
 from ..crashday import p3d
 
@@ -10,6 +13,108 @@ if 'bpy' in locals():
 
 def int_to_color(value):
     return (((value >> 16) & 255)/255.0, ((value >> 8) & 255)/255.0, (value & 255)/255.0)
+
+def get_folders_array_from_path(filepath):
+    drive, path_and_file = os.path.splitdrive(filepath)
+    path, _ = os.path.split(path_and_file)
+    folders = []
+    while True:
+        path, folder = os.path.split(path)
+
+        if folder != "":
+            folders.append(folder)
+        elif path != "":
+            folders.append(path)
+            break
+
+    return drive, folders
+
+def shorten_path(path, ind):
+    _, folders = get_folders_array_from_path(path)
+    folders.reverse()
+    out = os.path.join('..\\', *folders[ind:])
+    return out
+
+def find_texture_paths(filepath, search_path):
+    drive, folders = get_folders_array_from_path(filepath)
+    is_car = True if folders[1] == 'cars' else False
+    car_name = None
+    if is_car:
+        car_name = folders[0]
+        print('Car model is being loaded, guessed name {}'.format(car_name))
+    else:
+        print('Non car model is being loaded')
+
+    folders.reverse()
+
+    # load textures of the mod
+    try:
+        ind = folders.index('editor')
+        textures_mod_path = os.path.join(drive, *folders[:ind], 'textures\\')
+        if is_car and car_name is not None:
+            textures_mod_car_path = os.path.join(textures_mod_path, 'trkdata\\cars\\', car_name)
+            if os.path.isdir(textures_mod_car_path):
+                search_path.append(textures_mod_car_path)
+                print('Added {} local car textures path {}'.format(car_name, shorten_path(textures_mod_car_path, ind)))
+
+        if os.path.isdir(textures_mod_path):
+            search_path.append(textures_mod_path)
+            print('Added local mod textures path {}'.format(shorten_path(textures_mod_path, ind)))
+        
+    except ValueError:
+        print('Couldn\'t load local mod textures, model was not in \"editor\" folder. Trying to load textures from \"models" folder...')
+        
+    try:
+        ind = folders.index('models')
+        textures_mod_path = os.path.join(drive, *folders[:ind], 'textures\\')
+        if is_car and car_name is not None:
+            textures_mod_car_path = os.path.join(textures_mod_path, 'cars\\', car_name)
+            if os.path.isdir(textures_mod_car_path):
+                search_path.append(textures_mod_car_path)
+                print('Added {} local car textures path {}'.format(car_name, shorten_path(textures_mod_car_path, ind)))
+
+        if os.path.isdir(textures_mod_path):
+            search_path.append(textures_mod_path)
+            print('Added local mod textures path {}'.format(shorten_path(textures_mod_path, ind)))
+            
+    except ValueError:
+        print('Couldn\'t load textures, model was not in \"models\" folder.')
+
+    # load unpacked original cd textures if present
+    print('Trying to load textures from the car folder...')
+    try:
+        ind = folders.index('Crashday')
+        textures_cd_path = os.path.join(drive, *folders[:ind+1], 'data\\content\\textures\\')
+        if is_car and car_name is not None:
+            textures_cd_car_path = os.path.join(textures_cd_path, 'cars\\', car_name)
+            if os.path.isdir(textures_cd_car_path):
+                search_path.append(textures_cd_car_path)
+                print('Added {} crashday car textures path {}'.format(car_name, shorten_path(textures_cd_car_path, ind)))
+
+        if os.path.isdir(textures_cd_path):
+            search_path.append(textures_cd_path)
+            print('Added general crashday textures path {}'.format(shorten_path(textures_cd_path, ind)))
+    
+    except ValueError:
+        print('Couldn\'t find Crashday folder, no general textures loaded. Trying to use the method for classic Crashday...')
+        
+    try:
+        ind = folders.index(car_name)
+        textures_cd_path = os.path.join(drive, *folders[:ind-2])
+        textures_cd_path_base = os.path.join(drive, *folders[:ind-2])
+        if is_car and car_name is not None:
+            textures_cd_path = os.path.join(textures_cd_path_base, 'textures\\')
+            textures_cd_car_path = os.path.join(textures_cd_path_base, 'trkdata\\cars\\', car_name)
+            if os.path.isdir(textures_cd_car_path):
+                search_path.append(textures_cd_car_path)
+                print('Added {} crashday car textures path {}'.format(car_name, shorten_path(textures_cd_car_path, ind)))
+
+        if os.path.isdir(textures_cd_path):
+            search_path.append(textures_cd_path)
+            print('Added general crashday textures path {}'.format(shorten_path(textures_cd_path, ind)))
+                
+    except ValueError:
+        print('The alternative method is failed, no textures loaded.')
 
 def texture_exists(full_path, file_name):
     #remove extension and add to path
@@ -23,7 +128,6 @@ def texture_exists(full_path, file_name):
         print('Loaded dds in {}'.format(dds_path))
         return dds_path
     else:
-        print('Could not load texture {}'.format(p))
         return None
 
 def add_textures(p3d_model, paths):
@@ -33,12 +137,15 @@ def add_textures(p3d_model, paths):
         if texture is None:
             texture = bpy.data.textures.new(tex, type='IMAGE')
 
+        img = None
         for p in paths:
             path = texture_exists(p, tex)
             if path is not None:
                 img = bpy.data.images.load(path)
                 texture.image = img
                 break
+        if img is None:
+            print('Failed to load {}'.format(tex))
 
 def get_material_name(material_name):
     return material_name[1] + ' ' + material_name[0].lower()
@@ -87,16 +194,13 @@ def add_material(obj, material_name):
 
     obj.data.materials.append(material)
 
-def create_meshes(p3d_model, col, use_edge_split_modifier, remove_doubles_distance):
+def create_meshes(p3d_model, col, use_edge_split_modifier, remove_doubles_distance, hide_special_submeshes):
     for m in p3d_model.meshes:
         mesh = bpy.data.meshes.new(name=m.name)
         obj = bpy.data.objects.new(mesh.name, mesh)
         obj.location = m.pos
 
         col.objects.link(obj)
-
-        # if 'coll' in m.name or 'shad' in m.name or 'lod' in m.name or '.' in m.name:
-        #     obj.hide_set(True)
 
         items = mesh.cdp3d.bl_rna.properties['flags'].enum_items
         
@@ -146,8 +250,11 @@ def create_meshes(p3d_model, col, use_edge_split_modifier, remove_doubles_distan
             mod.use_edge_angle = False
             bm.to_mesh(mesh)
             bm.free()
-
-
+            
+        if hide_special_submeshes:
+            if 'maincoll' in m.name or 'mainshad' in m.name or 'lod' in m.name or '.' in m.name:
+                obj.hide_set(True)
+ 
 def create_lights(p3d_model, col):
     for l in p3d_model.lights:
         new_light = bpy.data.lights.new(name=l.name, type='POINT')
@@ -175,22 +282,16 @@ def load(operator,
          use_edge_split_modifier=True,
          remove_doubles_distance=0.00001,
          filepath='',
-         cd_path='', car_path='',
-         cd_path_mod='', car_path_mod=''):
+         search_textures=True,
+         hide_special_submeshes=True):
 
     file_name = filepath.split('\\')[-1]
 
     print('\nImporting file {} from {}'.format(file_name, filepath))
 
     search_path = []
-    if os.path.exists(cd_path):
-        search_path.append(cd_path)
-    if os.path.exists(car_path):
-        search_path.append(car_path)
-    if os.path.exists(cd_path_mod):
-        search_path.append(cd_path_mod)
-    if os.path.exists(car_path_mod):
-        search_path.append(car_path_mod)
+    if search_textures:
+        find_texture_paths(filepath, search_path)
 
     p = p3d.P3D()
 
@@ -205,7 +306,7 @@ def load(operator,
 
     add_textures(p, search_path)
     create_lights(p, col)
-    create_meshes(p, col, use_edge_split_modifier, remove_doubles_distance)
+    create_meshes(p, col, use_edge_split_modifier, remove_doubles_distance, hide_special_submeshes)
 
     create_pos(col, (0.0, 0.0, - p.height/2.0), 'floor_level')
 

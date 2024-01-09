@@ -56,24 +56,16 @@ class IMPORT_OT_cdp3d(bpy.types.Operator, ImportHelper):
         default     = 0.00001
     )
 
-    cd_path         : StringProperty(
-        name        = 'Path to general texture folder',
-        description = 'If provided plugin will auto load textures from this folder'
+    search_textures : BoolProperty(
+        name        = 'Search textures',
+        description = 'Tries to find texture folders and load correct textures for the model',
+        default     = True
     )
-
-    car_path        : StringProperty(
-        name        = 'Path to a car texture folder',
-        description = 'If provided plugin will auto load textures from this folder'
-    )
-
-    cd_path_mod     : StringProperty(
-        name        = 'Path to general texture folder of the mod',
-        description = 'If provided plugin will auto load textures from this folder'
-    )
-
-    car_path_mod    : StringProperty(
-        name        = 'Path to car texture folder of the mod',
-        description = 'If provided plugin will auto load textures from this folder'
+    
+    hide_special_submeshes : BoolProperty(
+        name        = 'Hide special submeshes',
+        description = 'Hides submeshes with special usage such as \"maincoll\", \"mainshad\", \"lod\" and etc.',
+        default     = True
     )
 
     def execute(self, context):
@@ -122,7 +114,7 @@ class EXPORT_OT_cdp3d(bpy.types.Operator, ExportHelper):
 
     use_empty_for_floor_level: BoolProperty(
         name        = 'Use empty \'floor_level\' object to define floor level',
-        default     = True
+        default     = False
     )
 
     bbox_mode       : EnumProperty(
