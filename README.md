@@ -1,7 +1,7 @@
 # Blender p3d import-export
 Crashday p3d model import-export addon for Blender 4.0
 
-**IMPORTANT NOTE: This plugin is made for _Crahday_ .p3d format! It wont work for ARMA or other games!**
+**IMPORTANT NOTE: This plugin is made for _Crashday_ .p3d format! It wont work for ARMA or other games!**
 
 ## Usage
 ### Installation
