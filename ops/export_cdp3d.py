@@ -47,7 +47,7 @@ def get_textures_used(ob):
             if mat.node_tree:
                 img = mat.node_tree.nodes.get('Image Texture') # get texture used in the material
                 if img and img.image: # if exists and has linked texture
-                    tn = img.image.name.rsplit( ".", 1 )[0] # remove extension if present
+                    tn = img.image.name.rsplit( ".", 1 )[ 0 ] # remove extension if present
                     mat.cdp3d.material_name = tn
                 else:
                     tn = mat.cdp3d.material_name # otherwise use material preset in cdp3d material properties
@@ -168,42 +168,10 @@ def save(operator,
         if log_file:
             log_file.write('! Collision mesh was not found, using main mesh for collisions.\n')
 
-    def get_bounds(ob, mesh, current_low = [0.0,0.0,0.0], current_max = [0.0,0.0,0.0]):
-        low = current_low
-        high = current_max
-
-        if len(mesh.vertices) > 0:
-            low = ob.matrix_world @ mesh.vertices[0].co
-            high = ob.matrix_world @ mesh.vertices[0].co
-
-        for v in mesh.vertices:
-            pos = ob.matrix_world @ v.co
-            for i in range(3):
-                if low[i] > pos[i]:
-                    low[i] = pos[i]
-                if high[i] < pos[i]:
-                    high[i] = pos[i]
-
-        return (low, high)
-
     # the main mesh in p3d is always at 0.0.
     # this means we need to move all other models alongside main mesh
-    main_mesh = main.to_mesh()
-    all_bounds = get_bounds(main, main_mesh)
-    main_bounds = get_bounds(main, main_mesh)
-    main_center = (main_bounds[1] + main_bounds[0])/2.0
+    main_center = main.location
     
-    floor_level = bpy.data.objects.get('floor_level')
-    if floor_level is None:
-        floor_level = bpy.data.objects.new('floor_level', None)
-        col.objects.link(floor_level)
-        floor_level.location = (0.0,0.0,0.0)
-        floor_level.empty_display_type = 'PLAIN_AXES'
-
-    if use_empty_for_floor_level:
-        delta = (floor_level.location - main_bounds[0])[2]
-        main_center[2] += delta/2
-
     # iterate through all objects in the scene and save into p3d model
     p.meshes = []
     p.lights = []
@@ -213,7 +181,7 @@ def save(operator,
 
             light = p3d.Light()
             light.name = sanitise_mesh_name(ob.name)
-            light.pos = ob.matrix_world.to_translation() - main_center + main.matrix_world.to_translation()
+            light.pos = ob.location - main_center
             light.range = ob.data.energy
             light.color = color_to_int(ob.data.color)
 
@@ -227,46 +195,63 @@ def save(operator,
             m = p3d.Mesh()
 
             m.name = sanitise_mesh_name(ob.name)
+            m.pos = ob.location - main_center
 
             mesh = ob.to_mesh()
 
-            mb = get_bounds(ob, mesh)
+            # save vertex positions
+            scale = ob.scale
 
-            # TODO: this naming makes me cry, do something please
-            # mb[0] for lowest position, mb[1] for highest position, then coordiantes
-            m.length = mb[1][0] - mb[0][0]
-            m.height = mb[1][2] - mb[0][2]
-            m.depth = mb[1][1] - mb[0][1]
+            lowx = 0.0
+            highx = 0.0
+            lowy = 0.0
+            highy = 0.0
+            lowz = 0.0
+            highz = 0.0
 
-            m.pos = (mb[1] + mb[0])/2.0 - main_center
+            if len(m.vertices) > 0:
+                lowx = highx = m.vertices[0].co[0]*scale[0]
+                lowy = highy = m.vertices[0].co[1]*scale[1]
+                lowz = highz = m.vertices[0].co[2]*scale[2]
 
-            if bbox_mode == 'ALL':
-                all_bounds = get_bounds(ob, mesh, all_bounds[0], all_bounds[1])
-                p.length = max(p.length, all_bounds[1][0] - all_bounds[0][0])
-                #p.height = max(p.height, all_bounds[1][2] - all_bounds[0][2])
-                p.depth = max(p.depth, all_bounds[1][1] - all_bounds[0][1])
-
-            # save vertices
+            # save vertices and calculate mesh bounds
             m.vertices = []
             for v in mesh.vertices:
-                m.vertices.append((ob.matrix_world @ v.co) - (mb[1] + mb[0])/2.0)
+                pos = [a*b for a,b in zip(v.co,scale)]
+                if lowx > pos[0]: lowx = pos[0]
+                if highx < pos[0]: highx = pos[0]
+                if lowy > pos[1]: lowy = pos[1]
+                if highy < pos[1]: highy = pos[1]
+                if lowz > pos[2]: lowz = pos[2]
+                if highz < pos[2]: highz = pos[2]
+                m.vertices.append(pos)
 
             m.num_vertices = len(m.vertices)
 
+            m.length = highx - lowx
+            m.height = highz - lowz
+            m.depth = highy - lowy
+
+            if bbox_mode == 'ALL':
+                p.height = max(p.height, m.height)
+                p.length = max(p.length, max(highx, -lowx) * 2)
+                p.depth = max(p.depth, max(highy, -lowy) * 2)
+
+            # save model bounds
             if ob == main:
+                floor_level = bpy.data.objects.get('floor_level')
+
                 m.name = sanitise_mesh_name('main')
-                m.pos = (0.0, 0.0, 0.0)
 
-                m.height += ((mb[1] + mb[0]))[2]
+                if floor_level is not None and use_empty_for_floor_level:
+                    fl_pos = floor_level.location
+                    m.height = -(fl_pos - main.location)[2]*2
 
-                if use_empty_for_floor_level:
-                    delta = (floor_level.location - main_bounds[0])[2]
-                    p.height = -floor_level.location[2]*2
-                else:
-                    p.height = m.height
-
+                # this is size calculation which is done in original p3d
+                # but this breaks collision for non-symmetrical tiles 
                 if bbox_mode == 'MAIN':
                     p.length = m.length
+                    p.height = m.height
                     p.depth = m.depth
 
                     # while this looks dumb, this is how original makep3d works
@@ -274,7 +259,6 @@ def save(operator,
                     if p.length >= 39.95 and p.length <= 40.05: p.length = 40
                     if p.depth >= 19.95 and p.depth <= 20.05: p.depth = 20
                     if p.depth >= 39.95 and p.depth <= 40.05: p.depth = 40
-
 
                 # this would fix non-symmetrical tile bounding-box
                 #p.height = m.height
