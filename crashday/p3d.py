@@ -1,4 +1,5 @@
 import struct
+import io
 
 # TODO:
 # - add error checking for struct reading\writing
@@ -21,6 +22,16 @@ def wf(file, format, *args):
 
 def wf_str(file, st):
     wf(file, '<%ds' % (len(st)+1), st.encode('ASCII', 'replace'))
+
+def write_block(file, signature, data_func):
+    """Write a block with the given signature, followed by its size (4 bytes)
+       and then the data produced by data_func."""
+    buf = io.BytesIO()
+    data_func(buf)
+    data = buf.getvalue()
+    file.write(signature)
+    wf(file, '<I', len(data))
+    file.write(data)
 
 class TextureInfo:
     def __init__(self):
@@ -214,14 +225,14 @@ pos: {}\nsize: {:.2f} {:.2f} {:.2f} \n'''.format(
             polys_in_tex = add_material_type('SHINING', j.num_shining, polys_in_tex) 
 
     def write(self, file):
+        # This method writes only the mesh data (without the SUBMESH header).
+        # The caller is responsible for wrapping it in a SUBMESH block.
         def w(format, *args):
             wf(file, format, *args)
 
         def w_str(st):
             wf_str(file, st)
 
-        file.write(b'SUBMESH')
-        w('<I', 1337)
         w_str(self.name.lower())
 
         w('<I6f', self.flags,
@@ -241,7 +252,7 @@ pos: {}\nsize: {:.2f} {:.2f} {:.2f} \n'''.format(
 
         if self.num_polys != len(self.polys):
             print('Counted num_polys differs from actual amount of polys! Report this error!')
-            self.num_polys = (self.polys)
+            self.num_polys = len(self.polys)
         w('<H', self.num_polys)
         for p in self.polys:
             p.write(file)
@@ -330,48 +341,36 @@ class P3D:
         self.user_data_size = r('<i')
 
     def write(self, file):
-        def w(format, *args):
-            wf(file, format, *args)
-
-        def w_str(st):
-            wf_str(file, st)
-
+        # Write header
         file.write(b'P3D\x02')
+        wf(file, '<3f', self.length, self.height, self.depth)
 
-        w('<3f', self.length, self.height, self.depth)
+        # ---- TEX block ----
+        def write_tex_data(buf):
+            wf(buf, '<B', self.num_textures)
+            for tex in self.textures:
+                tn = tex + '.tga'
+                wf_str(buf, tn.lower())
+        write_block(file, b'TEX', write_tex_data)
 
-        # texture list
-        file.write(b'TEX')
-        w('<I', 1337)
-        w('<B', self.num_textures)
-        if self.num_textures != len(self.textures):
-            print('Counted num_textures differs from actual amount of textures! Report this error!')
-            self.num_textures = len(self.textures)
-        for tex in self.textures:
-            tn = tex + '.tga'
-            w_str(tn.lower())
+        # ---- LIGHTS block ----
+        def write_lights_data(buf):
+            wf(buf, '<H', self.num_lights)
+            for light in self.lights:
+                light.write(buf)
+        write_block(file, b'LIGHTS', write_lights_data)
 
-        # lights list
-        file.write(b'LIGHTS')
-        w('<I', 1337)
-        w('<H', self.num_lights)
-        if self.num_lights != len(self.lights):
-            print('Counted num_lights differs from actual amount of lights! Report this error!')
-            self.num_lights = len(self.lights)
-        for light in self.lights:
-            light.write(file)
+        # ---- MESHES block ----
+        def write_meshes_data(buf):
+            wf(buf, '<H', self.num_meshes)
+            for m in self.meshes:
+                # Each mesh is written as a SUBMESH block
+                def write_submesh_data(sub_buf):
+                    m.write(sub_buf)
+                write_block(buf, b'SUBMESH', write_submesh_data)
+        write_block(file, b'MESHES', write_meshes_data)
 
-        # meshes list
-        file.write(b'MESHES')
-        w('<I', 1337)
-        w('<H', self.num_meshes)
-        if self.num_meshes != len(self.meshes):
-            print('Counted num_meshes differs from actual amount of meshes! Report this error!')
-            self.num_meshes = len(self.meshes)
-        for m in self.meshes:
-            m.write(file)
-
-        file.write( b'USER')
-        w('<I', 1337)
-        w('<i', 0)
-            
+        # ---- USER block ----
+        def write_user_data(buf):
+            wf(buf, '<i', 0)
+        write_block(file, b'USER', write_user_data)
