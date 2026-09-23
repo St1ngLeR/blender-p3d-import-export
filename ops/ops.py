@@ -23,7 +23,7 @@ if 'bpy' in locals():
 class IMPORT_OT_cdcca(bpy.types.Operator, ImportHelper):
     bl_idname       = 'import_scene.cdcca'
     bl_label        = 'Import CCA'
-    bl_description  = 'Import Crashday RE .cca file for positions'
+    bl_description  = 'Import Crashday .cca file for positions'
     bl_options      = {'UNDO'}
 
     filename_ext    = '.cca'
@@ -39,7 +39,7 @@ class IMPORT_OT_cdcca(bpy.types.Operator, ImportHelper):
 class IMPORT_OT_cdp3d(bpy.types.Operator, ImportHelper):
     bl_idname       = 'import_scene.cdp3d'
     bl_label        = 'Import P3D'
-    bl_description  = 'Import Crashday RE .p3d model'
+    bl_description  = 'Import Crashday .p3d model'
     bl_options      = {'UNDO'}
 
     filename_ext    = '.p3d'
@@ -94,11 +94,21 @@ class EXPORT_OT_cdcca(bpy.types.Operator, ExportHelper):
 class EXPORT_OT_cdp3d(bpy.types.Operator, ExportHelper):
     bl_idname       = 'export_scene.cdp3d'
     bl_label        = 'Export P3D'
-    bl_description  = 'Export Crashday RE .p3d model'
+    bl_description  = 'Export Crashday .p3d model'
 
     filename_ext    = '.p3d'
     filter_glob     : StringProperty(default='*.p3d',
                                      options={'HIDDEN'})
+
+    format_version : EnumProperty(
+        name='P3D Version',
+        description='Choose the P3D binary format to export',
+        items=(
+            ('V2', 'Version 2', 'Crashday 1.0 (and later) P3D V2 format'),
+            ('V1', 'Version 1', 'Crashday Self-Running Demo P3D v1 format'),
+        ),
+        default='V2'
+    )
 
     use_selection   : BoolProperty(
         name        = 'Selection Only',

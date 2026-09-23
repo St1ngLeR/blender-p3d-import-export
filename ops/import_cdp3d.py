@@ -1,5 +1,6 @@
 
 import bpy, bmesh, os
+from mathutils import Vector, Matrix
 import time
 import struct
 
@@ -195,10 +196,28 @@ def add_material(obj, material_name):
     obj.data.materials.append(material)
 
 def create_meshes(p3d_model, col, use_edge_split_modifier, remove_doubles_distance, hide_special_submeshes):
+    # P3D v1 uses its own model space.  The runtime defines the model center
+    # as (sizeX/2, sizeY/2, -sizeZ/2).  Blender should receive the model
+    # centered at the origin, with the P3D forward axis corrected by -90 deg
+    # around Blender Z.  Keep the conversion on the mesh data, not on the
+    # Blender object transform, so imported objects have a clean transform.
+    is_v1 = getattr(p3d_model, 'version', 2) == 1
+    if is_v1:
+        center = Vector((p3d_model.length * 0.5,
+                         p3d_model.height * 0.5,
+                         -p3d_model.depth * 0.5))
+        p3d_to_blender = (
+            Matrix.Rotation(3.141592653589793, 4, 'Z') @
+            Matrix.Rotation(1.5707963267948966, 4, 'X')
+        )
+    else:
+        center = Vector((0.0, 0.0, 0.0))
+        p3d_to_blender = Matrix.Identity(4)
+
     for m in p3d_model.meshes:
         mesh = bpy.data.meshes.new(name=m.name)
         obj = bpy.data.objects.new(mesh.name, mesh)
-        obj.location = m.pos
+        obj.location = Vector(m.pos)
 
         col.objects.link(obj)
 
@@ -223,8 +242,16 @@ def create_meshes(p3d_model, col, use_edge_split_modifier, remove_doubles_distan
             uvs.append((m.polys[i].u1, m.polys[i].v1))
             uvs.append((m.polys[i].u2, m.polys[i].v2))
             uvs.append((m.polys[i].u3, m.polys[i].v3))
-        
-        mesh.from_pydata(m.vertices, [], faces)
+
+        if is_v1:
+            converted_vertices = []
+            for vertex in m.vertices:
+                p = p3d_to_blender @ (Vector(vertex) - center)
+                converted_vertices.append(tuple(p))
+        else:
+            converted_vertices = m.vertices
+
+        mesh.from_pydata(converted_vertices, [], faces)
 
         for i, f in enumerate(mesh.polygons):
             mat_ind = [(j, item) for j, item in enumerate(m.materials_used) if item[1] == m.polys[i].texture and item[0] == m.polys[i].material]
@@ -256,6 +283,19 @@ def create_meshes(p3d_model, col, use_edge_split_modifier, remove_doubles_distan
                 obj.hide_set(True)
  
 def create_lights(p3d_model, col):
+    is_v1 = getattr(p3d_model, 'version', 2) == 1
+    if is_v1:
+        center = Vector((p3d_model.length * 0.5,
+                         p3d_model.height * 0.5,
+                         -p3d_model.depth * 0.5))
+        p3d_to_blender = (
+            Matrix.Rotation(3.141592653589793, 4, 'Z') @
+            Matrix.Rotation(1.5707963267948966, 4, 'X')
+        )
+    else:
+        center = Vector((0.0, 0.0, 0.0))
+        p3d_to_blender = Matrix.Identity(4)
+
     for l in p3d_model.lights:
         new_light = bpy.data.lights.new(name=l.name, type='POINT')
         new_light.color = int_to_color(l.color)
@@ -266,7 +306,7 @@ def create_lights(p3d_model, col):
         new_light.cdp3d.lightup_environment = l.lightup_environment
 
         light_object = bpy.data.objects.new(new_light.name, new_light)
-        light_object.location = l.pos
+        light_object.location = p3d_to_blender @ (Vector(l.pos) - center)
 
         col.objects.link(light_object)
 
@@ -298,6 +338,13 @@ def load(operator,
     file = open(filepath, 'rb')
     p.read(file)
     file.close()
+
+    if getattr(p, 'version', 2) == 1:
+        context.scene['p3d_v1_header_hex'] = p.v1_header.hex()
+        context.scene['p3d_v1_post_size_byte'] = p.v1_post_size_byte
+        context.scene['p3d_v1_size_x'] = float(p.length)
+        context.scene['p3d_v1_size_y'] = float(p.height)
+        context.scene['p3d_v1_size_z'] = float(p.depth)
 
     print(p)
 

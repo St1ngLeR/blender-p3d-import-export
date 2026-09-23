@@ -257,8 +257,216 @@ pos: {}\nsize: {:.2f} {:.2f} {:.2f} \n'''.format(
         for p in self.polys:
             p.write(file)
 
+
+P3D_V1_HEADER_SIZE = 18
+P3D_V1_TEXTURE_NAME_SIZE = 18
+P3D_V1_DEFAULT_HEADER = bytes(P3D_V1_HEADER_SIZE)
+
+
+def _read_fixed_ascii(file, size):
+    raw = file.read(size)
+    if len(raw) != size:
+        raise EOFError("Unexpected end of P3D v1 file")
+    return raw.split(b'\0', 1)[0].decode('ascii', 'replace')
+
+
+def _read_v1(file, model):
+    signature = file.read(4)
+    if signature != b'P3D\x01':
+        raise ValueError('Not a P3D version 1 file')
+
+    model.version = 1
+    model.v1_header = file.read(P3D_V1_HEADER_SIZE)
+    if len(model.v1_header) != P3D_V1_HEADER_SIZE:
+        raise EOFError('Truncated P3D v1 header')
+
+    model.length, model.height, model.depth = rf(file, '<3f')
+    model.v1_post_size_byte = rf(file, '<B')
+    model.num_textures = rf(file, '<B')
+    model.textures = []
+    model.v1_texture_groups = []
+
+    for _ in range(model.num_textures):
+        first_face = rf(file, '<H')
+        name = _read_fixed_ascii(file, P3D_V1_TEXTURE_NAME_SIZE)
+        counts = rf(file, '<6h')
+        texture = name + '.cbm'
+        model.textures.append(texture)
+        ti = TextureInfo()
+        ti.texture_start = first_face
+        (ti.num_flat, ti.num_flat_metal, ti.num_gouraud,
+         ti.num_gouraud_metal, ti.num_gouraud_metal_env,
+         ti.num_shining) = counts
+        model.v1_texture_groups.append(ti)
+
+    mesh = Mesh()
+    mesh.name = 'main'
+    mesh.flags = 1
+    mesh.pos = [0.0, 0.0, 0.0]
+    mesh.length = model.length
+    mesh.height = model.height
+    mesh.depth = model.depth
+    mesh.texture_infos = model.v1_texture_groups
+
+    mesh.num_vertices = rf(file, '<h')
+    if mesh.num_vertices <= 0:
+        raise ValueError('P3D v1 NumVertices must be > 0')
+    mesh.vertices = [list(rf(file, '<3f')) for _ in range(mesh.num_vertices)]
+
+    mesh.num_polys = rf(file, '<h')
+    if mesh.num_polys <= 0:
+        raise ValueError('P3D v1 NumPolys must be > 0')
+    mesh.polys = []
+    for _ in range(mesh.num_polys):
+        poly = Polygon()
+        # Version 1 stores P1, P2, P3 in this order and does not use
+        # the version-2 Y/Z or winding conversion.
+        (poly.p1, poly.u1, poly.v1,
+         poly.p2, poly.u2, poly.v2,
+         poly.p3, poly.u3, poly.v3) = rf(file, '<h2fh2fh2f')
+        mesh.polys.append(poly)
+
+    # Resolve packed texture/material groups exactly as the C++ runtime does.
+    mesh.materials_used = []
+    for ti_index, ti in enumerate(mesh.texture_infos):
+        cursor = ti.texture_start
+
+        def add_material_type(name, amount):
+            nonlocal cursor
+            for _ in range(max(0, amount)):
+                if cursor >= len(mesh.polys):
+                    raise ValueError('P3D v1 texture group exceeds polygon count')
+                pair = (name, model.textures[ti_index])
+                if pair not in mesh.materials_used:
+                    mesh.materials_used.append(pair)
+                mesh.polys[cursor].material = name
+                mesh.polys[cursor].texture = model.textures[ti_index]
+                cursor += 1
+
+        add_material_type('FLAT', ti.num_flat)
+        add_material_type('FLAT_METAL', ti.num_flat_metal)
+        add_material_type('GOURAUD', ti.num_gouraud)
+        add_material_type('GOURAUD_METAL', ti.num_gouraud_metal)
+        add_material_type('GOURAUD_METAL_ENV', ti.num_gouraud_metal_env)
+        add_material_type('SHINING', ti.num_shining)
+
+    # Version 1 calls these embedded lights/materials. They have no names.
+    model.num_lights = rf(file, '<h')
+    if model.num_lights < 0:
+        raise ValueError('Negative P3D v1 material/light count')
+    model.lights = []
+    model.v1_materials = []
+    for index in range(model.num_lights):
+        x, y, z, light_range, packed_color, corona, flares, lightup = \
+            rf(file, '<4fIBBB')
+        light = Light()
+        light.name = 'light_{:02d}'.format(index)
+        light.pos = [x, y, z]
+        light.range = light_range
+        light.color = packed_color
+        light.show_corona = bool(corona)
+        light.show_lens_flares = bool(flares)
+        light.lightup_environment = bool(lightup)
+        model.lights.append(light)
+        model.v1_materials.append({
+            'position': [x, y, z],
+            'range': light_range,
+            'packed_color': packed_color,
+            'corona': corona,
+            'lens_flares': flares,
+            'lightup': lightup,
+        })
+
+    model.num_meshes = 1
+    model.meshes = [mesh]
+
+
+def _v1_texture_base(name):
+    name = str(name)
+    for ext in ('.cbm', '.tga', '.dds'):
+        if name.lower().endswith(ext):
+            name = name[:-len(ext)]
+            break
+    return name
+
+
+def _write_v1(file, model):
+    file.write(b'P3D')
+    file.write(b'\x01')
+    header = bytes(getattr(model, 'v1_header', P3D_V1_DEFAULT_HEADER))
+    if len(header) != P3D_V1_HEADER_SIZE:
+        header = (header + bytes(P3D_V1_HEADER_SIZE))[:P3D_V1_HEADER_SIZE]
+    file.write(header)
+
+    wf(file, '<3fB', float(model.length), float(model.height),
+       float(model.depth), int(getattr(model, 'v1_post_size_byte', 1)) & 0xFF)
+
+    textures = list(model.textures)
+    if len(textures) > 255:
+        raise ValueError('P3D v1 supports at most 255 textures')
+    wf(file, '<B', len(textures))
+
+    mesh = model.meshes[0] if model.meshes else None
+    if mesh is None:
+        raise ValueError('P3D v1 requires one mesh')
+
+    infos = list(mesh.texture_infos)
+    if len(infos) != len(textures):
+        raise ValueError('P3D v1 texture group count does not match texture count')
+
+    for ti, texture in zip(infos, textures):
+        name = _v1_texture_base(texture).encode('ascii', 'replace')[:P3D_V1_TEXTURE_NAME_SIZE]
+        name = name + bytes(P3D_V1_TEXTURE_NAME_SIZE - len(name))
+        wf(file, '<H', int(ti.texture_start) & 0xFFFF)
+        file.write(name)
+        wf(file, '<6h', int(ti.num_flat), int(ti.num_flat_metal),
+           int(ti.num_gouraud), int(ti.num_gouraud_metal),
+           int(ti.num_gouraud_metal_env), int(ti.num_shining))
+
+    if len(mesh.vertices) > 32767 or len(mesh.polys) > 32767:
+        raise ValueError('P3D v1 uses signed 16-bit vertex/polygon counts')
+    wf(file, '<h', len(mesh.vertices))
+    for v in mesh.vertices:
+        wf(file, '<3f', float(v[0]), float(v[1]), float(v[2]))
+
+    wf(file, '<h', len(mesh.polys))
+    for poly in mesh.polys:
+        wf(file, '<h2fh2fh2f',
+           int(poly.p1), float(poly.u1), float(poly.v1),
+           int(poly.p2), float(poly.u2), float(poly.v2),
+           int(poly.p3), float(poly.u3), float(poly.v3))
+
+    lights = getattr(model, 'v1_materials', None)
+    if lights is None:
+        lights = []
+        for light in getattr(model, 'lights', []):
+            lights.append({
+                'position': light.pos,
+                'range': light.range,
+                'packed_color': light.color,
+                'corona': int(light.show_corona),
+                'lens_flares': int(light.show_lens_flares),
+                'lightup': int(light.lightup_environment),
+            })
+    if len(lights) > 32767:
+        raise ValueError('P3D v1 uses a signed 16-bit material/light count')
+    wf(file, '<h', len(lights))
+    for light in lights:
+        pos = light['position']
+        wf(file, '<4fIBBB', float(pos[0]), float(pos[1]), float(pos[2]),
+           float(light['range']), int(light['packed_color']) & 0xFFFFFFFF,
+           int(light['corona']) & 0xFF, int(light['lens_flares']) & 0xFF,
+           int(light['lightup']) & 0xFF)
+
+
 class P3D:
     def __init__(self):
+        self.version = 2
+        self.v1_header = P3D_V1_DEFAULT_HEADER
+        self.v1_post_size_byte = 1
+        self.v1_texture_groups = []
+        self.v1_materials = []
+
         self.length = 0.0
         self.height = 0.0
         self.depth = 0.0
@@ -292,6 +500,16 @@ class P3D:
             self.num_meshes, self.num_textures)
 
     def read(self, file):
+        start = file.tell()
+        signature = file.read(4)
+        file.seek(start)
+        if signature == b'P3D\x01':
+            _read_v1(file, self)
+            return
+        if signature != b'P3D\x02':
+            raise ValueError('Unknown P3D version/signature')
+        self.version = 2
+
         def r(format):
             return rf(file, format)
 
@@ -341,6 +559,10 @@ class P3D:
         self.user_data_size = r('<i')
 
     def write(self, file):
+        if getattr(self, 'version', 2) == 1:
+            _write_v1(file, self)
+            return
+
         # Write header
         file.write(b'P3D\x02')
         wf(file, '<3f', self.length, self.height, self.depth)

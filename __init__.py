@@ -14,7 +14,7 @@ bl_info = {
     'author': 'Wurunduk, St1ngLeR',
     'blender': (4, 0, 0),
     'location': 'File > Import-Export',
-    'version': (1, 7, 1),
+    'version': (1, 7, 3),
     'support': 'COMMUNITY',
     'category': 'Import-Export'}
 
